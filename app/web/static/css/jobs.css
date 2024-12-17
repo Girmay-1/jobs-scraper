@@ -1,0 +1,61 @@
+/* Job listing specific styles */
+
+.card {
+    transition: transform 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.badge {
+    font-size: 0.8rem;
+}
+
+.text-muted i {
+    margin-right: 0.25rem;
+}
+
+/* Filter form styles */
+.filter-form {
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+}
+
+/* Sort button styles */
+.sort-options .btn-group {
+    margin-right: 1rem;
+}
+
+/* Pagination customization */
+.pagination {
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+}
+
+.page-link {
+    color: #0d6efd;
+    border-color: #dee2e6;
+}
+
+.page-item.active .page-link {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .filter-form .row > div {
+        margin-bottom: 1rem;
+    }
+    
+    .sort-options {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .sort-options .btn-group {
+        margin-bottom: 1rem;
+    }
+}
