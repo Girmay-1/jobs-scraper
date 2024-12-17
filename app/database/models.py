@@ -1,11 +1,10 @@
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from typing import Dict, Any
 
-# Create base class for declarative models
 Base = declarative_base()
 
 class Job(Base):
@@ -18,7 +17,7 @@ class Job(Base):
     description = Column(Text)
     salary_range = Column(String(255))
     job_type = Column(String(50))
-    posted_date = Column(DateTime)
+    posted_date = Column(DateTime, index=True)  # Added index for date-based queries
     url = Column(String(512), unique=True, nullable=False)
     source = Column(String(100))
     is_active = Column(Boolean, default=True)
@@ -26,7 +25,14 @@ class Job(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationship with applications
-    applications = relationship("JobApplication", back_populates="job")
+    applications = relationship("JobApplication", back_populates="job", lazy='select')
+
+    # Add composite indexes for common search patterns
+    __table_args__ = (
+        Index('idx_job_search', 'title', 'company', 'location'),
+        Index('idx_job_filters', 'source', 'job_type', 'is_active'),
+        Index('idx_job_date_source', 'posted_date', 'source'),
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary"""
@@ -56,7 +62,12 @@ class JobApplication(Base):
     notes = Column(Text)
 
     # Relationship with job
-    job = relationship("Job", back_populates="applications")
+    job = relationship("Job", back_populates="applications", lazy='joined')
+
+    # Add index for status-based queries
+    __table_args__ = (
+        Index('idx_application_status', 'status', 'applied_date'),
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary"""
