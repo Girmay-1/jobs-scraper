@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.title }} - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Navigation Links -->
+    <div class="d-flex justify-content-between mb-4">
+        <div>
+            {% if prev_job %}
+            <a href="{{ url_for('main.job_detail', job_id=prev_job.id) }}" class="btn btn-outline-primary">
+                <i class="bi bi-arrow-left"></i> Previous Job
+            </a>
+            {% endif %}
+        </div>
+        <a href="{{ url_for('main.job_list') }}" class="btn btn-outline-secondary">Back to List</a>
+        <div>
+            {% if next_job %}
+            <a href="{{ url_for('main.job_detail', job_id=next_job.id) }}" class="btn btn-outline-primary">
+                Next Job <i class="bi bi-arrow-right"></i>
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Job Header -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h1 class="card-title h3">{{ job.title }}</h1>
+                    <h2 class="card-subtitle h5 text-muted mb-2">{{ job.company }}</h2>
+                </div>
+                <span class="badge bg-secondary">{{ job.source }}</span>
+            </div>
+            <div class="job-meta text-muted mb-3">
+                <i class="bi bi-geo-alt"></i> {{ job.location }}
+                {% if job.job_type %}
+                • <i class="bi bi-briefcase"></i> {{ job.job_type }}
+                {% endif %}
+                {% if job.salary_range %}
+                • <i class="bi bi-cash"></i> {{ job.salary_range }}
+                {% endif %}
+                • <i class="bi bi-calendar"></i> Posted: {{ job.posted_date.strftime('%Y-%m-%d') if job.posted_date }}
+            </div>
+            <a href="{{ job.url }}" target="_blank" class="btn btn-primary">
+                Apply on {{ job.source }} <i class="bi bi-box-arrow-up-right"></i>
+            </a>
+        </div>
+    </div>
+
+    <!-- Job Status Tracking -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Application Status</h3>
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('main.update_job_status', job_id=job.id) }}" method="POST">
+                <div class="row">
+                    <div class="col-md-6">
+                        <select name="status" class="form-select mb-3" onchange="this.form.submit()">
+                            <option value="viewed" {% if application and application.status == 'viewed' %}selected{% endif %}>
+                                Viewed
+                            </option>
+                            <option value="interested" {% if application and application.status == 'interested' %}selected{% endif %}>
+                                Interested
+                            </option>
+                            <option value="applied" {% if application and application.status == 'applied' %}selected{% endif %}>
+                                Applied
+                            </option>
+                            <option value="not_interested" {% if application and application.status == 'not_interested' %}selected{% endif %}>
+                                Not Interested
+                            </option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        {% if application and application.applied_date %}
+                        <small class="text-muted">
+                            Applied on: {{ application.applied_date.strftime('%Y-%m-%d') }}
+                        </small>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="notes" class="form-label">Notes</label>
+                    <textarea name="notes" id="notes" class="form-control" rows="3">{{ application.notes if application else '' }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Status</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Job Description -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3 class="h5 mb-0">Job Description</h3>
+        </div>
+        <div class="card-body">
+            <div class="job-description">
+                {{ job.description|safe }}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+<style>
+    .job-description {
+        white-space: pre-line;
+    }
+    .job-meta i {
+        margin-right: 0.25rem;
+    }
+    .badge {
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
