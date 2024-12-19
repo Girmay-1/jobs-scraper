@@ -49,12 +49,14 @@
                 Sort by: {{ sort_by.replace('_', ' ').title() }}
             </button>
             <ul class="dropdown-menu">
+                {% set args = request.args.copy() %}
+                {% set _ = args.pop('sort', None) %}
                 <li><a class="dropdown-item {% if sort_by == 'posted_date' %}active{% endif %}" 
-                       href="{{ url_for('main.job_list', sort='posted_date', **request.args) }}">Date Posted</a></li>
+                       href="{{ url_for('main.job_list', sort='posted_date', **args) }}">Date Posted</a></li>
                 <li><a class="dropdown-item {% if sort_by == 'company' %}active{% endif %}"
-                       href="{{ url_for('main.job_list', sort='company', **request.args) }}">Company</a></li>
+                       href="{{ url_for('main.job_list', sort='company', **args) }}">Company</a></li>
                 <li><a class="dropdown-item {% if sort_by == 'title' %}active{% endif %}"
-                       href="{{ url_for('main.job_list', sort='title', **request.args) }}">Title</a></li>
+                       href="{{ url_for('main.job_list', sort='title', **args) }}">Title</a></li>
             </ul>
         </div>
         <span class="ms-3">Found {{ jobs.total }} jobs</span>
@@ -108,16 +110,18 @@
 {% if jobs.pages > 1 %}
 <nav aria-label="Job listing pages">
     <ul class="pagination justify-content-center">
+        {% set args = request.args.copy() %}
+        {% set _ = args.pop('page', None) %}
         {% if jobs.has_prev %}
         <li class="page-item">
-            <a class="page-link" href="{{ url_for('main.job_list', page=jobs.prev_num, **request.args) }}">Previous</a>
+            <a class="page-link" href="{{ url_for('main.job_list', page=jobs.prev_num, **args) }}">Previous</a>
         </li>
         {% endif %}
 
         {% for page_num in jobs.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
             {% if page_num %}
                 <li class="page-item {% if page_num == jobs.page %}active{% endif %}">
-                    <a class="page-link" href="{{ url_for('main.job_list', page=page_num, **request.args) }}">
+                    <a class="page-link" href="{{ url_for('main.job_list', page=page_num, **args) }}">
                         {{ page_num }}
                     </a>
                 </li>
@@ -128,7 +132,7 @@
 
         {% if jobs.has_next %}
         <li class="page-item">
-            <a class="page-link" href="{{ url_for('main.job_list', page=jobs.next_num, **request.args) }}">Next</a>
+            <a class="page-link" href="{{ url_for('main.job_list', page=jobs.next_num, **args) }}">Next</a>
         </li>
         {% endif %}
     </ul>

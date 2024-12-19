@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from .models import Base
+from .database_init import db
 
 class Database:
     def __init__(self, db_uri: str, db_path: str):
@@ -35,7 +35,7 @@ class Database:
     def create_tables(self):
         """Create all tables in the database"""
         try:
-            Base.metadata.create_all(self.engine)
+            db.create_all()
             logging.info("Database tables created successfully")
         except SQLAlchemyError as e:
             logging.error(f"Error creating database tables: {e}")

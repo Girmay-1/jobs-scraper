@@ -45,9 +45,9 @@ def test_parse_job_card(indeed_scraper, mock_job_html):
     assert job_data is not None
     assert job_data['title'] == "Senior Python Developer"
     assert job_data['company'] == "Test Company"
-    assert job_data['location'] == "New York, NY"
-    assert "100000-150000/year" in job_data['salary_range']
-    assert job_data['job_type'] == "Full Time"
+    assert job_data['location'] == {'city': 'New York', 'state': 'NY'}
+    assert job_data['salary_range'] == {'min': 100000.0, 'max': 150000.0}
+    assert job_data['job_type'] == "Full-time"
     assert job_data['source'] == "Indeed"
 
 @patch('requests.Session')

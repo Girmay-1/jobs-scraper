@@ -1,38 +1,28 @@
 # Job Scraper
 
-A Python-based job scraping tool that aggregates software engineering job postings from Indeed, LinkedIn, and Glassdoor. This tool provides a centralized platform for tracking and analyzing job opportunities through a local web interface.
+A comprehensive job scraping and tracking system that collects job postings from Indeed, LinkedIn, and Glassdoor.
 
 ## Features
 
-- Automated job scraping from multiple sources
-- Local web interface for easy job browsing
-- Advanced filtering and search capabilities
-- Automated scheduling for regular updates
-- Data persistence using SQLite
+- Multi-source job scraping (Indeed, LinkedIn, Glassdoor)
+- Automated scraping twice daily
+- Web interface for job browsing and tracking
+- Advanced search and filtering
+- Application status tracking
+- US jobs focus with remote work options
 
-## Requirements
-
-- Python 3.x
-- pip (Python package installer)
-- Git
-
-## Installation
+## Quick Start
 
 1. Clone the repository:
 ```bash
-git clone [repository-url]
+git clone https://github.com/yourusername/job-scraper.git
 cd job_scraper
 ```
 
-2. Create and activate a virtual environment:
+2. Create and activate virtual environment:
 ```bash
-# On macOS and Linux
 python -m venv venv
 source venv/bin/activate
-
-# On Windows
-python -m venv venv
-.\venv\Scripts\activate
 ```
 
 3. Install dependencies:
@@ -40,46 +30,34 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-4. Set up environment variables:
+4. Initialize the database:
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+python -m app.database.init_db
 ```
 
-## Usage
-
-1. Start the local server:
+5. Start the web interface:
 ```bash
-python run.py
+flask run
 ```
 
-2. Access the web interface:
-Open your browser and navigate to `http://localhost:5000`
+## Documentation
 
-## Project Structure
+- [User Guide](docs/user/guide.md) - How to use the system
+- [Technical Documentation](docs/technical/overview.md) - System architecture and components
+- [API Documentation](docs/technical/api.md) - API endpoints and usage
+- [Setup Guide](docs/technical/setup.md) - Detailed setup instructions
+- [Maintenance Guide](docs/technical/maintenance.md) - System maintenance and troubleshooting
 
-```
-job_scraper/
-│
-├── app/
-│   ├── scraper/        # Job scraping modules
-│   ├── database/       # Database operations
-│   ├── web/           # Web interface
-│   └── scheduler/     # Automated scheduling
-│
-├── config/            # Configuration files
-├── tests/            # Test suite
-├── requirements.txt  # Project dependencies
-└── run.py           # Application entry point
-```
+## Configuration
+
+Key configuration options in `config/settings.py`:
+- Database settings
+- Scraping intervals
+- Search parameters
+- Logging configuration
 
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
-
-- BeautifulSoup4 for web scraping
-- Flask for web interface
-- SQLite for data storage

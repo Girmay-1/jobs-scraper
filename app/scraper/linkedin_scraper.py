@@ -1,142 +1,164 @@
+from typing import List, Dict, Any, Optional
 import logging
-from typing import List, Dict, Optional, Any
-from datetime import datetime
-from urllib.parse import urljoin, urlencode
 from bs4 import BeautifulSoup
+from urllib.parse import urlencode
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from .enhanced_base_scraper import EnhancedBaseScraper
+import time
 
-from .base_scraper import BaseScraper
-
-class LinkedInScraper(BaseScraper):
-    """Scraper for LinkedIn job listings"""
+class LinkedInScraper(EnhancedBaseScraper):
+    """Enhanced LinkedIn job scraper with anti-detection measures"""
     
-    def __init__(self, min_delay: float = 1.0, max_delay: float = 3.0):
-        """Initialize LinkedIn scraper"""
+    def __init__(self, proxy_list_path: str = None):
         super().__init__(
-            base_url="https://www.linkedin.com/jobs",
+            base_url="https://www.linkedin.com/jobs/search",
             site_name="LinkedIn",
-            min_delay=min_delay,
-            max_delay=max_delay
+            min_delay=3.0,
+            max_delay=7.0,
+            use_selenium=True,
+            proxy_list_path=proxy_list_path
         )
-        self.us_states = {
-            'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 
-            'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 
-            'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 
-            'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 
-            'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
-        }
+        
+    def search_jobs(self, query: str, location: str = None, **kwargs) -> List[Dict[str, Any]]:
+        jobs = []
+        location = location or "United States"
+        max_jobs = kwargs.get('limit', 100)  # Default to 100 jobs if no limit specified
+        
+        try:
+            if not self.driver:
+                logging.error("Selenium driver not initialized")
+                return jobs
 
+            page = 0
+            while len(jobs) < max_jobs and page < 10:  # Limit to 10 pages maximum
+                url = self._build_search_url(query, location, page)
+                
+                try:
+                    # Load the page
+                    self.driver.get(url)
+                    
+                    # Wait for job cards to load
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "base-search-card"))
+                    )
+                    
+                    # Scroll to load all jobs
+                    self._scroll_to_load_jobs()
+                    
+                    # Get page content
+                    content = self.driver.page_source
+                    soup = BeautifulSoup(content, 'html.parser')
+                    
+                    # Find all job cards
+                    job_cards = soup.find_all('div', class_=['base-card', 'base-search-card'])
+                    
+                    if not job_cards:
+                        logging.warning(f"No job cards found on page {page + 1}")
+                        break
+                    
+                    # Process each job card
+                    for card in job_cards:
+                        if len(jobs) >= max_jobs:
+                            break
+                            
+                        try:
+                            job_data = self._parse_job_card(card)
+                            if job_data:
+                                jobs.append(job_data)
+                        except Exception as e:
+                            logging.error(f"Error processing job card: {str(e)}")
+                            continue
+                    
+                    # Check if we need to load more
+                    if len(job_cards) < 25:  # LinkedIn typically shows 25 jobs per page
+                        break
+                    
+                    page += 1
+                    self._random_delay()
+                    
+                except Exception as e:
+                    logging.error(f"Error processing page {page}: {str(e)}")
+                    break
+                
+        except Exception as e:
+            logging.error(f"LinkedIn scraping error: {str(e)}")
+            
+        return jobs
+    
     def _build_search_url(self, query: str, location: str, page: int) -> str:
-        """Build LinkedIn search URL with parameters"""
         params = {
             'keywords': query,
             'location': location,
-            'start': page * 25,  # LinkedIn shows 25 jobs per page
-            'position': 1,
-            'pageNum': page,
-            'geoId': '103644278',  # United States geo ID
-            'f_TPR': 'r86400',     # Last 24 hours
+            'start': page * 25,
+            'sortBy': 'DD',      # Most recent
+            'f_TPR': 'r86400'    # Last 24 hours
         }
-        return f"{self.base_url}/search?{urlencode(params)}"
-
-    def _extract_job_cards(self, soup: BeautifulSoup) -> List[Any]:
-        """Extract job cards from search results page"""
-        return soup.find_all('div', class_='base-card')
-
-    def _is_us_location(self, location: str) -> bool:
-        """Check if the job location is in the US"""
-        if not location:
-            return False
-            
-        location = location.upper()
-        # Check for US state names or abbreviations
-        for state in self.us_states:
-            if f", {state}" in location or f", {state.title()}" in location:
-                return True
-                
-        # Check for United States, USA, or Remote
-        if "UNITED STATES" in location or "USA" in location or "REMOTE" in location:
-            return True
-            
-        return False
-
-    def _parse_job_card(self, card: Any) -> Optional[Dict[str, Any]]:
-        """Parse individual job card data"""
+        return f"{self.base_url}?{urlencode(params)}"
+    
+    def _scroll_to_load_jobs(self):
+        """Scroll the page to load all job listings"""
         try:
-            # Extract basic job information
-            title_elem = card.find('h3', class_='base-search-card__title')
-            company_elem = card.find('h4', class_='base-search-card__subtitle')
-            location_elem = card.find('span', class_='job-search-card__location')
-            
-            if not (title_elem and company_elem and location_elem):
-                return None
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            while True:
+                # Scroll down
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 
-            location = location_elem.text.strip()
-            # Skip non-US jobs
-            if not self._is_us_location(location):
-                return None
+                # Wait for content to load
+                time.sleep(2)
                 
-            # Get job URL
-            job_link = card.find('a', class_='base-card__full-link')
-            job_url = job_link.get('href') if job_link else None
+                # Calculate new scroll height
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                
+                # Break if no more content
+                if new_height == last_height:
+                    break
+                    
+                last_height = new_height
+                
+        except Exception as e:
+            logging.error(f"Error during scrolling: {str(e)}")
+    
+    def _parse_job_card(self, card: BeautifulSoup) -> Optional[Dict[str, Any]]:
+        try:
+            # Extract job details
+            title_elem = card.find(['h3', 'h4'], class_=['base-search-card__title', 'job-card-list__title'])
+            company_elem = card.find(['h4', 'a'], class_=['base-search-card__subtitle', 'job-card-container__company-name'])
+            location_elem = card.find('span', class_=['job-search-card__location', 'job-card-container__metadata-item'])
             
-            if not job_url:
+            # Verify required elements exist
+            if not all([title_elem, company_elem, location_elem]):
                 return None
             
-            # Extract additional information
-            job_type_elem = card.find('span', class_='job-search-card__listdate')
-            date_elem = card.find('time', class_='job-search-card__listdate')
+            # Get URL
+            link_elem = card.find('a', class_=['base-card__full-link', 'job-card-container__link'])
+            if not link_elem or not link_elem.get('href'):
+                return None
             
-            # Build normalized job data
             job_data = {
                 'title': title_elem.text.strip(),
                 'company': company_elem.text.strip(),
-                'location': self._normalize_location(location),
-                'salary_range': None,  # LinkedIn usually doesn't show salary on cards
-                'job_type': self._normalize_job_type(job_type_elem.text.strip() if job_type_elem else None),
-                'url': job_url,
+                'location': location_elem.text.strip(),
+                'url': link_elem['href'],
                 'source': 'LinkedIn',
-                'posted_date': self._normalize_date(date_elem.get('datetime') if date_elem else None),
-                'description': None  # Will be filled in by get_job_details
+                'posted_date': self._extract_date(card)
             }
+            
+            # Extract salary if available
+            salary_elem = card.find('span', class_=['job-search-card__salary-info', 'job-card-container__salary-info'])
+            if salary_elem:
+                job_data['salary'] = salary_elem.text.strip()
             
             return job_data
             
         except Exception as e:
-            logging.error(f"Error parsing LinkedIn job data: {e}")
+            logging.error(f"Error parsing LinkedIn job card: {str(e)}")
             return None
-
-    def get_job_details(self, job_url: str) -> Optional[Dict[str, Any]]:
-        """Get detailed job information from job page"""
-        try:
-            soup = self._get_soup(job_url)
-            
-            # Find job description
-            description_elem = soup.find('div', class_='show-more-less-html__markup')
-            if not description_elem:
-                return None
-            
-            # Try to find salary information in the details
-            salary_elem = soup.find('span', class_='salary')
-            
-            # Try to find employment type
-            job_type_elem = soup.find('span', class_='employment-type')
-            
-            details = {
-                'description': description_elem.get_text(strip=True),
-                'url': job_url,
-                'source': 'LinkedIn'
-            }
-            
-            # Add salary if found
-            if salary_elem:
-                details['salary_range'] = self._normalize_salary(salary_elem.text)
-                
-            # Add or update job type if found
-            if job_type_elem:
-                details['job_type'] = self._normalize_job_type(job_type_elem.text)
-            
-            return details
-            
-        except Exception as e:
-            logging.error(f"Error fetching LinkedIn job details from {job_url}: {e}")
-            return None
+    
+    def _extract_date(self, card: BeautifulSoup) -> str:
+        """Extract job posting date"""
+        time_elem = card.find(['time', 'span'], class_=['job-search-card__listdate', 'job-card-container__listed-status'])
+        if time_elem:
+            return time_elem.get('datetime', time_elem.text.strip())
+        return ''
