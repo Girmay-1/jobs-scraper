@@ -1,0 +1,237 @@
+from typing import List, Dict, Any, Optional
+import logging
+import time
+import random
+from bs4 import BeautifulSoup
+from urllib.parse import urlencode
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from retry import retry
+from .enhanced_base_scraper import EnhancedBaseScraper
+
+class GlassdoorScraper(EnhancedBaseScraper):
+    def __init__(self, proxy_list_path: str = None):
+        super().__init__(
+            base_url="https://www.glassdoor.com",
+            site_name="Glassdoor",
+            min_delay=3.0,
+            max_delay=6.0,
+            use_selenium=True,
+            proxy_list_path=proxy_list_path
+        )
+
+    @retry(tries=3, delay=2, backoff=2, exceptions=(WebDriverException,))
+    def search_jobs(self, query: str, location: str = None, **kwargs) -> List[Dict[str, Any]]:
+        jobs = []
+        page = 1
+        limit = int(kwargs.get('limit', float('inf')))
+        location = location or "United States"
+        
+        while len(jobs) < limit:
+            try:
+                # Build URL with pagination
+                url = self._build_search_url(query, location, page)
+                logging.info(f"Searching Glassdoor page {page}: {url}")
+                
+                # Rotate proxy if available
+                self._rotate_proxy()
+                
+                # Load the page
+                self.driver.get(url)
+                self._random_delay(2, 4)
+                
+                # Handle popups
+                self._handle_popups()
+                
+                # Wait for job listings
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-test='job-link']"))
+                    )
+                except TimeoutException:
+                    logging.warning(f"No job cards found on page {page}")
+                    break
+
+                # Get page content
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                job_cards = soup.select("[data-test='job-link']")
+
+                if not job_cards:
+                    break
+
+                # Process found jobs
+                for card in job_cards:
+                    if len(jobs) >= limit:
+                        break
+                        
+                    job_data = self._parse_job_card(card)
+                    if job_data:
+                        jobs.append(job_data)
+
+                # Check if we should continue to next page
+                if len(job_cards) < 30:  # Glassdoor typically shows 30 jobs per page
+                    break
+                    
+                page += 1
+                self._random_delay()
+
+            except Exception as e:
+                logging.error(f"Error scraping Glassdoor page {page}: {str(e)}")
+                break
+        
+        return jobs
+
+    def _build_search_url(self, query: str, location: str, page: int = 1) -> str:
+        # Format location for URL
+        location_param = location.replace(" ", "-").lower()
+        
+        params = {
+            'sc.keyword': query,
+            'locT': 'C',
+            'locId': '1',
+            'locKeyword': location,
+            'jobType': 'all',
+            'fromAge': '1',
+            'radius': '100',
+            'sortBy': 'date_desc'
+        }
+        
+        url = f"{self.base_url}/Job/jobs-in-{location_param}?{urlencode(params)}"
+        if page > 1:
+            url += f"&p={page}"
+            
+        return url
+
+    def _handle_popups(self):
+        """Handle various Glassdoor popups and modals"""
+        popup_selectors = [
+            'button[alt="Close"]',
+            'span[alt="Close"]',
+            'button[class*="modal_closeButton"]',
+            'button[class*="closeButton"]',
+            '[class*="modal_closeIcon"]',
+            '[class*="closeIcon"]',
+            'div[class*="modal_closeButton"]',
+            '[aria-label="Close"]',
+            '#JAModal > button',
+            '.modal_closeIcon',
+            '.close'
+        ]
+        
+        for selector in popup_selectors:
+            try:
+                elements = WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                )
+                for element in elements:
+                    if element.is_displayed():
+                        try:
+                            element.click()
+                            self._random_delay(1, 2)
+                        except:
+                            continue
+            except TimeoutException:
+                continue
+
+    def _parse_job_card(self, card: BeautifulSoup) -> Optional[Dict[str, Any]]:
+        try:
+            # Updated selectors for better reliability
+            title_selectors = [
+                "[data-test='job-link']",
+                "a[class*='jobLink']",
+                "div[data-test='job-title']",
+                "a[class*='jobTitle']"
+            ]
+            
+            company_selectors = [
+                "[data-test='employer-name']",
+                "div[class*='employerName']",
+                "div[class*='companyName']",
+                "span[class*='employerName']"
+            ]
+            
+            location_selectors = [
+                "[data-test='location']",
+                "div[class*='location']",
+                "span[class*='location']",
+                "div[data-test='location']"
+            ]
+            
+            # Try to find elements using different selectors
+            title_elem = None
+            for selector in title_selectors:
+                title_elem = card.select_one(selector)
+                if title_elem:
+                    break
+
+            company_elem = None
+            for selector in company_selectors:
+                company_elem = card.parent.select_one(selector)  # Look in parent for company
+                if company_elem:
+                    break
+
+            location_elem = None
+            for selector in location_selectors:
+                location_elem = card.parent.select_one(selector)  # Look in parent for location
+                if location_elem:
+                    break
+
+            if not all([title_elem, company_elem, location_elem]):
+                return None
+
+            # Get job URL
+            job_url = None
+            if 'href' in title_elem.attrs:
+                job_url = self.base_url + title_elem['href']
+
+            job_data = {
+                'title': title_elem.text.strip(),
+                'company': company_elem.text.strip(),
+                'location': self.normalize_location(location_elem.text.strip()),
+                'source': 'Glassdoor',
+                'url': job_url
+            }
+
+            # Try to get salary info
+            salary_selectors = [
+                "[data-test='salary-estimate']",
+                "span[data-test='detailSalary']",
+                "div[class*='salary']",
+                "span[class*='salary']"
+            ]
+            
+            for selector in salary_selectors:
+                salary_elem = card.parent.select_one(selector)
+                if salary_elem:
+                    job_data['salary_range'] = self.normalize_salary(salary_elem.text.strip())
+                    break
+
+            # Try to get posting date
+            date_selectors = [
+                "[data-test='job-age']",
+                "div[class*='listing-age']",
+                "span[class*='jobAge']"
+            ]
+            
+            for selector in date_selectors:
+                date_elem = card.parent.select_one(selector)
+                if date_elem:
+                    job_data['posted_date'] = date_elem.text.strip()
+                    break
+
+            return job_data
+
+        except Exception as e:
+            logging.error(f"Error parsing Glassdoor job card: {str(e)}")
+            return None
+
+    def _rotate_proxy(self):
+        """Rotate proxy if available"""
+        if self.proxy_list:
+            proxy = random.choice(self.proxy_list)
+            self.driver.capabilities['proxy'] = {
+                'httpProxy': proxy,
+                'sslProxy': proxy
+            }

@@ -26,9 +26,40 @@ class JobRepository:
     def get(self, job_id: int) -> Optional[Job]:
         """Get a job by ID with optimized loading"""
         return self.session.query(Job)\
-            .options(contains_eager(Job.applications))\
             .filter(Job.id == job_id)\
             .first()
+
+    def update(self, job_id: int, job_data: Dict[str, Any]) -> Optional[Job]:
+        """Update an existing job"""
+        try:
+            job = self.get(job_id)
+            if not job:
+                return None
+                
+            for key, value in job_data.items():
+                setattr(job, key, value)
+                
+            self.session.commit()
+            return job
+        except Exception as e:
+            self.session.rollback()
+            logging.error(f"Error updating job: {e}")
+            raise
+
+    def delete(self, job_id: int) -> bool:
+        """Delete a job by ID"""
+        try:
+            job = self.get(job_id)
+            if not job:
+                return False
+                
+            self.session.delete(job)
+            self.session.commit()
+            return True
+        except Exception as e:
+            self.session.rollback()
+            logging.error(f"Error deleting job: {e}")
+            raise
 
     def bulk_create(self, jobs_data: List[Dict[str, Any]]) -> List[Job]:
         """Bulk create jobs for better performance"""

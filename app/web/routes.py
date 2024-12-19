@@ -1,9 +1,19 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
 from app.database.models import Job, JobApplication
-from sqlalchemy import or_
+from app.database.repository import JobRepository
+from sqlalchemy import or_, and_
 from datetime import datetime
+from . import db
 
 main_bp = Blueprint('main', __name__)
+
+SOFTWARE_JOB_KEYWORDS = [
+    'software engineer',
+    'software developer',
+    'full stack developer',
+    'backend engineer',
+    'java developer'
+]
 
 @main_bp.route('/')
 def index():
@@ -16,16 +26,19 @@ def job_list():
     # Get filter parameters
     keyword = request.args.get('keyword', '')
     location = request.args.get('location', '')
-    job_type = request.args.get('job_type', '')
     company = request.args.get('company', '')
-    source = request.args.get('source', '')
     sort_by = request.args.get('sort', 'posted_date')
     page = request.args.get('page', 1, type=int)
     
-    # Base query
-    query = Job.query
+    # Base query - always filter for US jobs and software engineering roles
+    query = Job.query.filter(
+        and_(
+            Job.location.ilike('%United States%'),
+            or_(*[Job.title.ilike(f'%{kw}%') for kw in SOFTWARE_JOB_KEYWORDS])
+        )
+    )
 
-    # Apply filters
+    # Apply additional filters
     if keyword:
         query = query.filter(
             or_(
@@ -35,12 +48,8 @@ def job_list():
         )
     if location:
         query = query.filter(Job.location.ilike(f'%{location}%'))
-    if job_type:
-        query = query.filter(Job.job_type == job_type)
     if company:
         query = query.filter(Job.company.ilike(f'%{company}%'))
-    if source:
-        query = query.filter(Job.source == source)
 
     # Apply sorting
     if sort_by == 'posted_date':
@@ -50,17 +59,15 @@ def job_list():
     elif sort_by == 'title':
         query = query.order_by(Job.title)
 
-    # Pagination
-    per_page = 20
+    # Pagination with larger per_page value
+    per_page = 50
     jobs = query.paginate(page=page, per_page=per_page, error_out=False)
 
     return render_template('jobs/list.html',
                          jobs=jobs,
                          keyword=keyword,
                          location=location,
-                         job_type=job_type,
                          company=company,
-                         source=source,
                          sort_by=sort_by)
 
 @main_bp.route('/jobs/<int:job_id>')
@@ -114,10 +121,57 @@ def update_job_status(job_id):
 
 @main_bp.route('/about')
 def about():
-    """About page"""
-    return render_template('about.html')
+    """About page with statistics"""
+    stats = {
+        'total_jobs': Job.query.filter(
+            and_(
+                Job.location.ilike('%United States%'),
+                or_(*[Job.title.ilike(f'%{kw}%') for kw in SOFTWARE_JOB_KEYWORDS])
+            )
+        ).count(),
+        'total_companies': db.session.query(Job.company).distinct().count(),
+        'total_locations': db.session.query(Job.location).distinct().count(),
+        'job_types': SOFTWARE_JOB_KEYWORDS
+    }
+    return render_template('about.html', **stats)
 
-@main_bp.route('/contact')
-def contact():
-    """Contact page"""
-    return render_template('contact.html')
+@main_bp.route('/api/jobs')
+def api_jobs():
+    """API endpoint for job data"""
+    keyword = request.args.get('keyword', '')
+    location = request.args.get('location', '')
+    company = request.args.get('company', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+
+    # Base query - always filter for US jobs and software engineering roles
+    query = Job.query.filter(
+        and_(
+            Job.location.ilike('%United States%'),
+            or_(*[Job.title.ilike(f'%{kw}%') for kw in SOFTWARE_JOB_KEYWORDS])
+        )
+    )
+
+    # Apply additional filters
+    if keyword:
+        query = query.filter(
+            or_(
+                Job.title.ilike(f'%{keyword}%'),
+                Job.description.ilike(f'%{keyword}%')
+            )
+        )
+    if location:
+        query = query.filter(Job.location.ilike(f'%{location}%'))
+    if company:
+        query = query.filter(Job.company.ilike(f'%{company}%'))
+
+    # Paginate
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    jobs = pagination.items
+
+    return jsonify({
+        'jobs': [job.to_dict() for job in jobs],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    })

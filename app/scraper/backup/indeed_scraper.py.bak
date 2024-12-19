@@ -1,0 +1,243 @@
+from typing import List, Dict, Any, Optional
+import logging
+import time
+from bs4 import BeautifulSoup
+from urllib.parse import urlencode
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from retry import retry
+from .enhanced_base_scraper import EnhancedBaseScraper
+
+class IndeedScraper(EnhancedBaseScraper):
+    def __init__(self, proxy_list_path: str = None):
+        super().__init__(
+            base_url="https://www.indeed.com",
+            site_name="Indeed",
+            min_delay=2.0,
+            max_delay=5.0,
+            use_selenium=True,
+            proxy_list_path=proxy_list_path
+        )
+        self.job_card_selectors = [
+            "div.job_seen_beacon",
+            "div.resultContent",
+            "div.slider_container",
+            "div[class*='job-card']",
+            "td.resultContent"
+        ]
+
+    @retry(tries=3, delay=2, backoff=2, exceptions=(WebDriverException,))
+    def search_jobs(self, query: str, location: str = None, **kwargs) -> List[Dict[str, Any]]:
+        jobs = []
+        page = 0
+        limit = int(kwargs.get('limit', float('inf')))
+        location = location or "United States"
+        
+        while len(jobs) < limit:
+            try:
+                # Build URL with pagination
+                url = self._build_search_url(query, location, page)
+                logging.info(f"Searching Indeed page {page}: {url}")
+                
+                # Rotate proxy if available
+                self._rotate_proxy()
+                
+                # Load the page
+                self.driver.get(url)
+                self._random_delay(2, 4)
+                
+                # Handle CAPTCHA if present
+                if self._handle_captcha():
+                    continue  # Retry the same page
+                
+                # Wait for job cards
+                job_cards_found = False
+                for selector in self.job_card_selectors:
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        job_cards_found = True
+                        break
+                    except TimeoutException:
+                        continue
+
+                if not job_cards_found:
+                    logging.warning(f"No job cards found on page {page}")
+                    break
+
+                # Parse the page
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                
+                # Find job cards
+                job_cards = []
+                for selector in self.job_card_selectors:
+                    cards = soup.select(selector)
+                    if cards:
+                        job_cards = cards
+                        break
+
+                if not job_cards:
+                    break
+
+                # Process found jobs
+                for card in job_cards:
+                    if len(jobs) >= limit:
+                        break
+                        
+                    job_data = self._parse_job_card(card)
+                    if job_data:
+                        jobs.append(job_data)
+
+                # Check if we should continue to next page
+                if len(job_cards) < 15:  # Indeed typically shows 15 jobs per page
+                    break
+                    
+                page += 1
+                self._random_delay()
+
+            except Exception as e:
+                logging.error(f"Error scraping Indeed page {page}: {str(e)}")
+                break
+        
+        return jobs
+
+    def _build_search_url(self, query: str, location: str, page: int = 0) -> str:
+        params = {
+            'q': query,
+            'l': location,
+            'fromage': '1',           # Last 24 hours
+            'sort': 'date',           # Sort by date
+            'filter': '0',            # No filter
+            'radius': '25'            # 25 mile radius
+        }
+        
+        url = f"{self.base_url}/jobs?{urlencode(params)}"
+        if page > 0:
+            url += f"&start={page * 10}"
+        return url
+
+    def _handle_captcha(self) -> bool:
+        """Handle CAPTCHA if present. Returns True if CAPTCHA was detected."""
+        captcha_indicators = [
+            "verify you are a human",
+            "captcha",
+            "please verify",
+            "check security"
+        ]
+        
+        page_text = self.driver.page_source.lower()
+        if any(indicator in page_text for indicator in captcha_indicators):
+            logging.warning("CAPTCHA detected, rotating proxy and retrying...")
+            self._rotate_proxy()
+            return True
+        return False
+
+    def _parse_job_card(self, card: BeautifulSoup) -> Optional[Dict[str, Any]]:
+        try:
+            # Multiple selectors for title
+            title_selectors = [
+                "h2.jobTitle span:not([class])",
+                "h2.jobTitle",
+                "h2.title",
+                "a.jcs-JobTitle",
+                "div[data-testid='jobTitle']",
+                "span[title]"
+            ]
+            
+            title_elem = None
+            for selector in title_selectors:
+                title_elem = card.select_one(selector)
+                if title_elem:
+                    break
+
+            # Multiple selectors for company
+            company_selectors = [
+                "span.companyName",
+                "div.company",
+                "span[data-testid='company-name']",
+                "div[class*='company']"
+            ]
+            
+            company_elem = None
+            for selector in company_selectors:
+                company_elem = card.select_one(selector)
+                if company_elem:
+                    break
+
+            # Multiple selectors for location
+            location_selectors = [
+                "div.companyLocation",
+                "div.location",
+                "div[data-testid='text-location']",
+                "div[class*='location']"
+            ]
+            
+            location_elem = None
+            for selector in location_selectors:
+                location_elem = card.select_one(selector)
+                if location_elem:
+                    break
+
+            if not all([title_elem, company_elem, location_elem]):
+                return None
+
+            # Extract job URL
+            job_url = None
+            if 'data-jk' in card.attrs:
+                job_id = card['data-jk']
+                job_url = f"{self.base_url}/viewjob?jk={job_id}"
+            elif title_elem.name == 'a' and 'href' in title_elem.attrs:
+                job_url = self.base_url + title_elem['href']
+
+            job_data = {
+                'title': title_elem.text.strip(),
+                'company': company_elem.text.strip(),
+                'location': self.normalize_location(location_elem.text.strip()),
+                'source': 'Indeed',
+                'url': job_url
+            }
+
+            # Try to get salary
+            salary_selectors = [
+                "div.salary-snippet",
+                "div[class*='salary']",
+                "div[data-testid='attribute_snippet_compensation']",
+                "div[class*='salary-snippet']"
+            ]
+            
+            for selector in salary_selectors:
+                salary_elem = card.select_one(selector)
+                if salary_elem:
+                    job_data['salary_range'] = self.normalize_salary(salary_elem.text.strip())
+                    break
+
+            # Try to get posting date
+            date_selectors = [
+                "span.date",
+                "div[class*='posted']",
+                "span[class*='posted']"
+            ]
+            
+            for selector in date_selectors:
+                date_elem = card.select_one(selector)
+                if date_elem:
+                    job_data['posted_date'] = date_elem.text.strip()
+                    break
+
+            return job_data
+
+        except Exception as e:
+            logging.error(f"Error parsing Indeed job card: {str(e)}")
+            return None
+
+    def _rotate_proxy(self):
+        """Rotate proxy if available"""
+        if self.proxy_list:
+            proxy = random.choice(self.proxy_list)
+            self.driver.capabilities['proxy'] = {
+                'httpProxy': proxy,
+                'sslProxy': proxy
+            }
